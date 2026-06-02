@@ -1,0 +1,24 @@
+# Build/runtime artifacts
+result/*.json
+result/*.log
+*.log
+gpu_result.log
+cpu_result.log
+mem_result.log
+ib_result.log
+perftest_out.json
+
+# gpu-burn build outputs (rebuilt per host via gpu/build_gpuburn.sh)
+gpu/gpu_burn
+gpu/compare.fatbin
+gpu/compare.ptx
+
+# DCGM cuda13 package is 419MB — exceeds GitHub's 100MB single-file limit.
+# Download manually from NVIDIA when the dcgm backend is needed; see README.
+gpu/datacenter-gpu-manager-4-cuda13_*.deb
+
+# OS / editor noise
+.DS_Store
+*.swp
+*.swo
+*~
