@@ -26,24 +26,35 @@ default is `gpuburn`; otherwise it is `dcgm`. Override with `--gpu-tool`.
 Results are written to `result/<module>_result.json` and rolled up into
 `result/report.json`.
 
-## Building gpu-burn for sm_120 (RTX 5090)
+## Building gpu-burn for sm_120 (RTX 5090) — no Docker, no nvcc
 
-The `gpu_burn` binary and `compare.fatbin` must live in `gpu/`. Use the
-wrapper, which builds inside the CUDA 13 dev container:
+The `gpu_burn` binary and `compare.fatbin` must live in `gpu/`. The build
+wrapper needs only **g++, python3, and PyPI access** — no Docker, no CUDA
+toolkit, no nvcc, no sudo:
 
 ```bash
-sudo ~/uqsm5090/gpu/build_gpuburn.sh
+~/uqsm5090/gpu/build_gpuburn.sh
 ```
 
-`COMPUTE=120` targets Blackwell (sm_120). Upstream gpu-burn switched the
-comparison kernel from `compare.ptx` to `compare.fatbin`; the wrapper copies
-whichever is produced.
+It pulls the CUDA **12.8** headers, cuBLAS `.so`, and `libnvrtc` from NVIDIA's
+pip wheels, compiles the g++ driver, links against `libcublas.so.12`, **and
+regenerates `gpu/compare.fatbin` from `compare.cu` as `sm_120` SASS via nvrtc**
+(no prebuilt kernel is reused — a fatbin is toolchain-version-locked, and a
+CUDA-13 one fails on a 570 driver with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`).
+
+**Why CUDA 12.8 and not the newest toolkit?** 12.8 is the first toolkit that
+supports Blackwell `sm_120` and only requires NVIDIA driver **≥ 570**, yet it
+also runs on every newer driver — so a single 12.8 build is portable across the
+whole RTX 5090 fleet. A CUDA 13 build needs driver ≥ 580 and otherwise kills
+every gpu_burn worker (`(DIED!)`) on a 570-era host. `run_sm.bash` runs a driver
+preflight and the scripts are CUDA-major-agnostic (override `CUDA_VER` /
+`CUDA_MAJOR` to target a different driver); see `CLAUDE.md` for details.
 
 ## Running gpu-burn (bare metal, no Docker)
 
 gpu-burn runs **directly on the physical machine — Docker is not used at
-runtime.** The only CUDA toolkit dependency is `libcublas.so.13` (which pulls
-in `libcublasLt.so.13`); both are vendored under `gpu/lib/` and loaded via
+runtime.** The only CUDA toolkit dependency is `libcublas.so.12` (which pulls
+in `libcublasLt.so.12`); both are vendored under `gpu/lib/` and loaded via
 `LD_LIBRARY_PATH`. The CUDA *driver* lib `libcuda.so.1` comes from the installed
 NVIDIA driver — it is the user-space half of the kernel module and can never be
 bundled or statically linked.
@@ -52,7 +63,7 @@ bundled or statically linked.
 ./uqsm.bash -dt gpu --gpu-tool gpuburn --gpu-duration 600   # no sudo needed
 ```
 
-The libs (`gpu/lib/libcublas.so.13` + `libcublasLt.so.13`, ~565 MB) are too
+The libs (`gpu/lib/libcublas.so.12` + `libcublasLt.so.12`, ~828 MB) are too
 large for GitHub's 100 MB limit, so they are **not** committed. They are already
 bundled inside the OSS release tarball (below). After a bare `git clone`, fetch
 them once — no Docker, no CUDA toolkit, just `curl`:
@@ -61,9 +72,8 @@ them once — no Docker, no CUDA toolkit, just `curl`:
 ./gpu/setup_libs.sh        # downloads the cuBLAS pip wheel and extracts the two .so
 ```
 
-`gpu/build_gpuburn.sh` (which *does* use a CUDA container) is only needed to
-**rebuild** the `gpu_burn` binary itself; the prebuilt binary is committed, so
-normal use never touches Docker.
+`gpu/build_gpuburn.sh` is only needed to **rebuild** the `gpu_burn` binary
+itself; the prebuilt binary is committed, so normal use never rebuilds anything.
 
 ## Using the dcgm backend (non-Blackwell hosts)
 

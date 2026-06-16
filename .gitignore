@@ -12,7 +12,7 @@ perftest_out.json
 # bare metal without rebuilding. Only the PTX variant stays ignored.
 gpu/compare.ptx
 
-# Vendored CUDA user-space libs (libcublasLt.so.13 is ~514MB — over GitHub's
+# Vendored CUDA user-space libs (libcublasLt.so.12 is ~717MB — over GitHub's
 # 100MB single-file limit). NOT committed; fetched by gpu/setup_libs.sh, and
 # already bundled inside the OSS release tarball. The driver lib libcuda.so.1
 # is never here — it comes from the installed NVIDIA driver.
