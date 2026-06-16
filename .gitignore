@@ -8,10 +8,16 @@ mem_result.log
 ib_result.log
 perftest_out.json
 
-# gpu-burn build outputs (rebuilt per host via gpu/build_gpuburn.sh)
-gpu/gpu_burn
-gpu/compare.fatbin
+# gpu_burn (88K) and compare.fatbin (2K) ARE committed now, so a clone runs on
+# bare metal without rebuilding. Only the PTX variant stays ignored.
 gpu/compare.ptx
+
+# Vendored CUDA user-space libs (libcublasLt.so.13 is ~514MB — over GitHub's
+# 100MB single-file limit). NOT committed; fetched by gpu/setup_libs.sh, and
+# already bundled inside the OSS release tarball. The driver lib libcuda.so.1
+# is never here — it comes from the installed NVIDIA driver.
+gpu/lib/
+gpu/_dl/
 
 # DCGM cuda13 package is 419MB — exceeds GitHub's 100MB single-file limit.
 # Download manually from NVIDIA when the dcgm backend is needed; see README.

@@ -52,42 +52,18 @@ run_dcgm() {
 }
 
 # -------------------------------------------------------------- gpu-burn ---
-# Strategy: prefer running the host binary directly; if the CUDA 13 user-space
-# libs (libcublas.so.13) are not present, fall back to the CUDA 13 runtime
-# container with --gpus all so the driver is passed through but the libs come
-# from the image.
-GPUBURN_IMAGE="${GPUBURN_IMAGE:-nvidia/cuda:13.0.1-runtime-ubuntu22.04}"
-
-host_has_cuda13_libs() {
-	ldconfig -p 2>/dev/null | grep -q 'libcublas\.so\.13' \
-		&& ldconfig -p 2>/dev/null | grep -q 'libcudart\.so\.13'
-}
-
+# Runs the host gpu_burn binary directly on the physical machine -- no Docker.
+# The only CUDA toolkit deps (libcublas.so.13 + its transitive libcublasLt.so.13)
+# are vendored in $SCRIPT_DIR/lib and resolved via LD_LIBRARY_PATH. The CUDA
+# driver lib (libcuda.so.1) comes from the installed NVIDIA driver, as it always
+# must -- it is the user-space half of the kernel module and cannot be bundled.
 run_gpuburn_host() {
 	pushd "$SCRIPT_DIR" >/dev/null
-	"./gpu_burn" -d "$DURATION"
+	LD_LIBRARY_PATH="$SCRIPT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+		"./gpu_burn" -d "$DURATION"
 	local rc=$?
 	popd >/dev/null
 	return $rc
-}
-
-run_gpuburn_docker() {
-	local docker_bin
-	if command -v docker >/dev/null 2>&1; then
-		docker_bin="docker"
-	else
-		echo "docker not found and host lacks CUDA 13 libs"
-		return 127
-	fi
-	# mario is not in the docker group on this host, so prefix with sudo if needed.
-	local sudo_prefix=""
-	if ! $docker_bin info >/dev/null 2>&1; then
-		sudo_prefix="sudo"
-	fi
-	echo "[gpu-burn] using container $GPUBURN_IMAGE (host lacks CUDA 13 libs)"
-	$sudo_prefix $docker_bin run --rm --gpus all \
-		-v "$SCRIPT_DIR:/work" -w /work \
-		"$GPUBURN_IMAGE" ./gpu_burn -d "$DURATION"
 }
 
 run_gpuburn() {
@@ -105,19 +81,21 @@ run_gpuburn() {
 		echo "===GPU Stress Test Failed==="
 		return 1
 	fi
+	if [ ! -f "$SCRIPT_DIR/lib/libcublas.so.13" ] || [ ! -f "$SCRIPT_DIR/lib/libcublasLt.so.13" ]; then
+		echo "vendored CUDA libs missing under $SCRIPT_DIR/lib/ (need libcublas.so.13 + libcublasLt.so.13)"
+		echo "Fetch with: $SCRIPT_DIR/setup_libs.sh"
+		echo "===GPU Stress Test Failed==="
+		return 1
+	fi
 
 	if ! command -v nvidia-smi >/dev/null 2>&1; then
 		echo "nvidia-smi not found"
 		echo "===GPU Stress Test Failed==="; return 1
 	fi
 
-	echo "[gpu-burn] running for ${DURATION}s on all visible GPUs..."
+	echo "[gpu-burn] running for ${DURATION}s on all visible GPUs (bare metal, no docker)..."
 	local rc=0
-	if host_has_cuda13_libs; then
-		run_gpuburn_host; rc=$?
-	else
-		run_gpuburn_docker; rc=$?
-	fi
+	run_gpuburn_host; rc=$?
 
 	if [ $rc -eq 0 ]; then
 		echo "===GPU Stress Test Success==="

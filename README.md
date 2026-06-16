@@ -39,23 +39,31 @@ sudo ~/uqsm5090/gpu/build_gpuburn.sh
 comparison kernel from `compare.ptx` to `compare.fatbin`; the wrapper copies
 whichever is produced.
 
-## Running gpu-burn
+## Running gpu-burn (bare metal, no Docker)
 
-If the host has CUDA 13 user-space libs (`libcublas.so.13`, `libcudart.so.13`),
-the binary runs directly. Otherwise the runner falls back to the CUDA 13
-runtime container with `--gpus all`, so the driver is passed through but the
-libs come from the image. This is the default on this host.
-
-The runner uses `sudo docker` when the current user is not in the `docker`
-group, so the whole harness should be invoked with `sudo` for the gpu-burn
-path:
+gpu-burn runs **directly on the physical machine — Docker is not used at
+runtime.** The only CUDA toolkit dependency is `libcublas.so.13` (which pulls
+in `libcublasLt.so.13`); both are vendored under `gpu/lib/` and loaded via
+`LD_LIBRARY_PATH`. The CUDA *driver* lib `libcuda.so.1` comes from the installed
+NVIDIA driver — it is the user-space half of the kernel module and can never be
+bundled or statically linked.
 
 ```bash
-sudo ./uqsm.bash -dt gpu --gpu-tool gpuburn --gpu-duration 600
+./uqsm.bash -dt gpu --gpu-tool gpuburn --gpu-duration 600   # no sudo needed
 ```
 
-Override the image with the `GPUBURN_IMAGE` env var if you need a different
-CUDA version.
+The libs (`gpu/lib/libcublas.so.13` + `libcublasLt.so.13`, ~565 MB) are too
+large for GitHub's 100 MB limit, so they are **not** committed. They are already
+bundled inside the OSS release tarball (below). After a bare `git clone`, fetch
+them once — no Docker, no CUDA toolkit, just `curl`:
+
+```bash
+./gpu/setup_libs.sh        # downloads the cuBLAS pip wheel and extracts the two .so
+```
+
+`gpu/build_gpuburn.sh` (which *does* use a CUDA container) is only needed to
+**rebuild** the `gpu_burn` binary itself; the prebuilt binary is committed, so
+normal use never touches Docker.
 
 ## Using the dcgm backend (non-Blackwell hosts)
 

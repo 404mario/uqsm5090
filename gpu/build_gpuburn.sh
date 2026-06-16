@@ -6,6 +6,10 @@ set -euo pipefail
 OUT="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 UID_GID="$(id -u mario):$(id -g mario)"
 
+# NOTE: Docker is used ONLY to BUILD the binary (the host has no CUDA toolkit).
+# The resulting gpu_burn runs on bare metal with no docker -- see run_sm.bash /
+# setup_libs.sh. We bake an $ORIGIN/lib RPATH so the binary finds the vendored
+# CUDA libs in gpu/lib/ relative to itself, regardless of where the dir is copied.
 docker run --rm -v "$OUT:/out" nvidia/cuda:13.0.1-devel-ubuntu22.04 bash -c '
   set -e
   apt-get update -qq
@@ -13,7 +17,7 @@ docker run --rm -v "$OUT:/out" nvidia/cuda:13.0.1-devel-ubuntu22.04 bash -c '
   cd /tmp
   git clone --depth 1 https://github.com/wilicc/gpu-burn
   cd gpu-burn
-  make COMPUTE=120
+  make COMPUTE=120 LDFLAGS="-Wl,-rpath,\$ORIGIN/lib -lcuda -lcublas"
   # Upstream switched the comparison kernel from PTX to fatbin; copy whichever exists.
   cp gpu_burn /out/
   [ -f compare.fatbin ] && cp compare.fatbin /out/ || true
