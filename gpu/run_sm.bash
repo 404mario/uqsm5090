@@ -57,13 +57,47 @@ run_dcgm() {
 # are vendored in $SCRIPT_DIR/lib and resolved via LD_LIBRARY_PATH. The CUDA
 # driver lib (libcuda.so.1) comes from the installed NVIDIA driver, as it always
 # must -- it is the user-space half of the kernel module and cannot be bundled.
+# Runs gpu_burn and captures a filtered copy of its output to $1 for verdict
+# parsing. gpu_burn floods the terminal with \r-overwritten progress lines (and
+# a DIED worker repeats its error every cycle -> gigabytes of spam), so we
+# convert \r to \n and throttle the progress lines, while ALWAYS keeping the
+# summary, init errors, and any line containing "(DIED!)". Returns gpu_burn's
+# own exit code via PIPESTATUS.
 run_gpuburn_host() {
+	local logfile="$1" rc
 	pushd "$SCRIPT_DIR" >/dev/null
 	LD_LIBRARY_PATH="$SCRIPT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-		"./gpu_burn" -d "$DURATION"
-	local rc=$?
+		"./gpu_burn" -d "$DURATION" 2>&1 \
+		| tr '\r' '\n' \
+		| awk '
+			/proc.d:/ {                      # progress line: throttle the spam
+				prog++
+				if (prog % 200 == 0 || /\(DIED!\)/) { print; fflush() }
+				next
+			}
+			{ print; fflush() }              # everything else passes through
+		' \
+		| tee "$logfile"
+	rc=${PIPESTATUS[0]}
 	popd >/dev/null
-	return $rc
+	return "$rc"
+}
+
+# When a worker dies, the usual cause on a shared host is too little free VRAM
+# (another process already holds it). Surface per-GPU memory + the holders.
+gpuburn_report_busy_gpus() {
+	command -v nvidia-smi >/dev/null 2>&1 || return 0
+	echo "[gpu-burn] gpu_burn allocates a large block of VRAM per GPU; deaths are"
+	echo "           usually GPUs already in use. Current memory (MiB):"
+	nvidia-smi --query-gpu=index,memory.used,memory.total,memory.free \
+	           --format=csv,noheader,nounits 2>/dev/null \
+	  | awk -F', *' '{ printf "             GPU %s: %s/%s used, %s free%s\n", \
+	                   $1,$2,$3,$4, ($4+0 < 2048 ? "   <-- too low for gpu_burn" : "") }'
+	echo "[gpu-burn] processes holding GPU memory:"
+	nvidia-smi --query-compute-apps=pid,process_name,used_memory \
+	           --format=csv,noheader 2>/dev/null | sed 's/^/             /' || true
+	echo "[gpu-burn] free the busy GPUs, or restrict to idle ones with"
+	echo "           CUDA_VISIBLE_DEVICES=<ids>, then re-run."
 }
 
 # Guard against the "(DIED!)" trap: a cuBLAS from CUDA major N cannot initialize
@@ -143,17 +177,44 @@ run_gpuburn() {
 	fi
 
 	echo "[gpu-burn] running for ${DURATION}s on all visible GPUs (bare metal, no docker)..."
-	local rc=0
-	run_gpuburn_host; rc=$?
+	local rc=0 logfile
+	logfile="$(mktemp)"
+	run_gpuburn_host "$logfile"; rc=$?
 
-	if [ $rc -eq 0 ]; then
-		echo "===GPU Stress Test Success==="
-		return 0
-	else
-		echo "gpu_burn exit code: $rc"
+	# IMPORTANT: do NOT trust gpu_burn's exit code or its "GPU N: OK" summary to
+	# decide pass/fail. A worker that DIED has 0 compute errors, so gpu_burn marks
+	# it OK and (unless ALL workers die) exits 0 -- a silent false pass. The only
+	# reliable death signals are in the output itself, so we parse them here.
+	local fail=0 reason="" died=0
+	if grep -qaE '\(DIED!\)' "$logfile"; then
+		fail=1; died=1; reason="one or more GPU workers DIED"
+	fi
+	if grep -qaE 'No clients are alive' "$logfile"; then
+		fail=1; died=1; reason="all GPU workers died"
+	fi
+	if grep -qaE 'GPU [0-9]+: FAULTY' "$logfile"; then
+		fail=1; reason="${reason:+$reason; }GPU(s) reported FAULTY (compute errors)"
+	fi
+	if grep -qaiE "couldn't init a GPU test|Error in load module|unsupported PTX|unsupported toolchain" "$logfile"; then
+		fail=1; reason="${reason:+$reason; }a GPU test failed to initialize"
+	fi
+	if [ "$rc" -ne 0 ]; then
+		fail=1; reason="${reason:+$reason; }gpu_burn exit code $rc"
+	fi
+	# A clean run must reach the end-of-test summary; its absence means it aborted.
+	if ! grep -qaE '^Tested [0-9]+ GPUs:' "$logfile"; then
+		fail=1; reason="${reason:+$reason; }no completion summary (gpu_burn aborted early)"
+	fi
+
+	rm -f "$logfile"
+	if [ "$fail" -ne 0 ]; then
+		echo "[gpu-burn] FAILED: $reason"
+		[ "$died" -eq 1 ] && gpuburn_report_busy_gpus
 		echo "===GPU Stress Test Failed==="
 		return 1
 	fi
+	echo "===GPU Stress Test Success==="
+	return 0
 }
 
 case "$TOOL" in
