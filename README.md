@@ -32,6 +32,11 @@ The big cuBLAS `.so` files physically cannot be committed to GitHub (single-file
 100 MB limit), which is why a clone needs `setup_libs.sh` but the OSS tarball
 does not. **If you just want to run the test, use the OSS tarball.**
 
+> **Hit `(DIED!)`, or unsure which build matches your driver?** See
+> [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — the driver ⇄ CUDA ⇄ artifact
+> matching matrix and what the runtime preflight checks. Background:
+> [`docs/POSTMORTEM-rtx5090-gpuburn.md`](docs/POSTMORTEM-rtx5090-gpuburn.md).
+
 ## Modules
 - `cpu/`   stress-ng `--matrix 0 -t 10m` (unchanged)
 - `mem/`   memtester via `memtester_loop.sh 88 32 65536` (unchanged, ~7h)
