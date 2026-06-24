@@ -4,6 +4,34 @@ Fork of the scitix `uqsm` v1.1 stress-test harness with one change: the GPU
 module can run with **gpu-burn** instead of **dcgmi diag -r 4**, so it works on
 RTX 5090 / Blackwell hosts where DCGM does not yet support the SKU.
 
+## Getting it — use the OSS tarball (recommended), not `git clone`
+
+There are two sources and they are **not** equivalent:
+
+| Source | gpu-burn CUDA libs included? | Ready to run? |
+|--------|------------------------------|---------------|
+| **OSS tarball (recommended)** | ✅ yes — `gpu/lib/*.so.12` are bundled | **Unzip and run, no extra step** |
+| `git clone` (developers) | ❌ no — `libcublasLt.so.12` is ~717 MB, over GitHub's 100 MB/file limit | must run `gpu/setup_libs.sh` once to fetch the libs |
+
+**Recommended (unzip-and-run):**
+```bash
+wget https://oss-cn-shanghai.siflow.cn/scitix-release/uqsm5090_v1.1.tar.gz   # Shanghai
+#   or: https://oss-ap-southeast.scitix.ai/scitix-release/uqsm5090_v1.1.tar.gz  # Malaysia mirror
+tar xzf uqsm5090_v1.1.tar.gz && cd uqsm5090
+./gpu/run_sm.bash gpuburn 60        # runs immediately — libs are already in gpu/lib/
+```
+
+**From `git clone` (only if you are modifying the code):**
+```bash
+git clone https://github.com/404mario/uqsm5090 && cd uqsm5090
+./gpu/setup_libs.sh                 # one-time: downloads the cuBLAS libs (~828 MB) that can't live in git
+./gpu/run_sm.bash gpuburn 60
+```
+
+The big cuBLAS `.so` files physically cannot be committed to GitHub (single-file
+100 MB limit), which is why a clone needs `setup_libs.sh` but the OSS tarball
+does not. **If you just want to run the test, use the OSS tarball.**
+
 ## Modules
 - `cpu/`   stress-ng `--matrix 0 -t 10m` (unchanged)
 - `mem/`   memtester via `memtester_loop.sh 88 32 65536` (unchanged, ~7h)
